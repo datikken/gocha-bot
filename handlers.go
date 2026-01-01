@@ -1,9 +1,10 @@
 package main
 
 import (
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"log"
 	"strings"
-	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+	"time"
 )
 
 func handleMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
@@ -19,11 +20,14 @@ func handleMessage(bot *tgbotapi.BotAPI, message *tgbotapi.Message) {
 		"start": func(bot *tgbotapi.BotAPI, chatID int64, user *User, fullText string) {
 			sendStartMessage(bot, chatID, user)
 		},
-		"inviteclient":  func(bot *tgbotapi.BotAPI, chatID int64, user *User, fullText string) {
+		"inviteclient": func(bot *tgbotapi.BotAPI, chatID int64, user *User, fullText string) {
 			inviteClient(bot, chatID, user, fullText)
 		},
 		"clients": func(bot *tgbotapi.BotAPI, chatID int64, user *User, fullText string) {
 			listClients(bot, chatID, user)
+		},
+		"visit": func(bot *tgbotapi.BotAPI, chatID int64, user *User, fullText string) {
+			handleVisit(bot, chatID, user, fullText)
 		},
 	}
 
@@ -44,6 +48,7 @@ func sendStartMessage(bot *tgbotapi.BotAPI, chatID int64, user *User) {
 Welcome to the Barbershop Bot!
 Use /inviteclient to save customer.
 Use /clients to get list of customers
+User /visit 2026-01-01 10:10 @username to create a visit for a client.
 `
 
 	msg := tgbotapi.NewMessage(chatID, text)
@@ -100,5 +105,61 @@ func listClients(bot *tgbotapi.BotAPI, chatID int64, user *User) {
 	}
 
 	msg := tgbotapi.NewMessage(chatID, text)
+	bot.Send(msg)
+}
+
+func handleVisit(bot *tgbotapi.BotAPI, chatID int64, user *User, fullText string) {
+	// Parse the command: /visit 2026-01-01 10:10 @username
+	parts := strings.Fields(fullText)
+	if len(parts) < 4 {
+		msg := tgbotapi.NewMessage(chatID, "Usage: /visit YYYY-MM-DD HH:MM @username")
+		bot.Send(msg)
+		return
+	}
+
+	dateStr := parts[1]
+	timeStr := parts[2]
+	username := strings.TrimPrefix(parts[3], "@")
+
+	if username == "" {
+		msg := tgbotapi.NewMessage(chatID, "Invalid username")
+		bot.Send(msg)
+		return
+	}
+
+	// Parse date and time
+	dateTimeStr := dateStr + " " + timeStr
+	visitDate, err := time.Parse("2006-01-02 15:04", dateTimeStr)
+	if err != nil {
+		msg := tgbotapi.NewMessage(chatID, "Invalid date/time format. Use YYYY-MM-DD HH:MM")
+		bot.Send(msg)
+		return
+	}
+
+	// Check if the user is a client of the current user
+	client, err := getUserByUsername(username)
+	if err != nil {
+		msg := tgbotapi.NewMessage(chatID, "Client not found")
+		bot.Send(msg)
+		return
+	}
+
+	// Verify the client was invited by this user
+	if client.InvitedBy != user.ID {
+		msg := tgbotapi.NewMessage(chatID, "You can only schedule visits for your own clients")
+		bot.Send(msg)
+		return
+	}
+
+	// Create the visit
+	err = createVisit(client.ID, visitDate)
+	if err != nil {
+		log.Printf("Error creating visit: %v", err)
+		msg := tgbotapi.NewMessage(chatID, "Error creating visit")
+		bot.Send(msg)
+		return
+	}
+
+	msg := tgbotapi.NewMessage(chatID, "Visit scheduled for "+username+" on "+dateStr+" at "+timeStr)
 	bot.Send(msg)
 }
